@@ -1,0 +1,857 @@
+#!/usr/perl5/bin/perl -w
+
+#
+# lgrpinfo: display information about locality groups.
+#
+# CDDL HEADER START
+#
+# The contents of this file are subject to the terms of the
+# Common Development and Distribution License, Version 1.0 only
+# (the "License").  You may not use this file except in compliance
+# with the License.
+#
+# You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+# or http://www.opensolaris.org/os/licensing.
+# See the License for the specific language governing permissions
+# and limitations under the License.
+#
+# When distributing Covered Code, include this CDDL HEADER in each
+# file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+# If applicable, add the following below this CDDL HEADER, with the
+# fields enclosed by brackets "[]" replaced with your own identifying
+# information: Portions Copyright [yyyy] [name of copyright owner]
+#
+# CDDL HEADER END
+#
+# Copyright 2005 Sun Microsystems, Inc.  All rights reserved.
+#
+# ident	"@(#)lgrpinfo	1.1	05/08/05"
+#
+
+use strict;
+use Getopt::Long qw(:config no_ignore_case bundling auto_version);
+use File::Basename;
+use Solaris::Lgrp ':CONSTANTS';
+
+my $my_name = basename($0, ".pl");
+
+my $l =  Solaris::Lgrp->new or 
+  (print STDERR "$my_name:can not get lgroup information from the system: $!\n",
+   exit(1));
+
+my $version = $l->version;
+
+our $VERSION = "1.72 (liblgrp version $version)";
+
+our $help = <<EOH;
+
+Usage: $my_name [-achlmrt] [-u unit] [-I] [-C|-P] lgrp ...
+       $my_name -T [-acmr] [-u unit]
+
+   Display information about locality groups
+
+	-a: Equivalent to "-tcmlr" without -T and to "-cmr" with -T
+	-c: Print CPU information
+	-C: Children of the specified lgoups
+	-h: Print this message and exit
+	-I: Print lgroup or CPU IDs only
+	-l: Print information about lgroup latencies
+	-m: Print memory information
+	-P: Parent(s) of the specified lgoups
+	-r: Print lgroup resources
+	-t: Print information about lgroup topology
+	-T: Print the hierarchy tree
+	-u unit: Specify memory unit (b,k,m,g,t)
+
+
+    The lgrp may be specified as "root", "all", "interm", "leaves"
+
+    Options may be merged together.
+
+    The default set of options is "-tcm -u m all"
+
+    Without any options print topology, CPU and memory information about each
+    lgrp. If any lgroup IDs are specified on the command line only print
+    information about the specified lgroup. The lgroup ID should be numeric or
+    one of the words 'root', 'all', 'leaves' or 'intermediate'.
+
+EOH
+
+# Function prototypes
+sub usage();
+sub lgrp_expand($@);
+sub uniq(@);
+sub lgrp_tree($;$);
+sub lgrp_print($$);
+sub lgrp_pp($$$$);
+sub lgrp_prettyprint($);
+sub lgrp_showmemory($$);
+sub lgrp_showcpus($$);
+sub lgrp_showresources($);
+sub lgrp_cpus_to_string(@);
+
+########################################
+# Main body
+##
+our($opt_a, $opt_l, $opt_m, $opt_c, $opt_C, $opt_t, $opt_h, $opt_u, $opt_r,
+    $opt_P, $opt_I, $opt_T);
+
+GetOptions("a"   => \$opt_a,
+	   "c"   => \$opt_c,
+	   "C"	 => \$opt_C,
+	   "h|?" => \$opt_h,
+	   "l"   => \$opt_l,
+	   "I"   => \$opt_I,
+	   "m"   => \$opt_m,
+	   "r"   => \$opt_r,
+	   "t"	 => \$opt_t,
+	   "T"   => \$opt_T,
+	   "u=s" => \$opt_u,
+	   "P"   => \$opt_P) || usage();
+
+usage() if $opt_h;
+
+# Check for conflicting options
+my $nfilters = 0;
+$nfilters++ if $opt_C;
+$nfilters++ if $opt_P;
+$nfilters++ if $opt_T;
+
+if ($nfilters > 1) {
+    print STDERR
+      "$my_name: Options -C, -T and -P can not be used together\n";
+    usage();
+}
+
+if ($opt_T && ($opt_I || $opt_t || $opt_l)) {
+	print STDERR
+	  "$my_name: Option -T can not be used with -I, -t or -l\n";
+	usage();
+}
+
+if ($opt_T && @ARGV) {
+	print STDERR
+	  "$my_name: Warning: with -T all lgroups on the";
+	print STDERR " command line are ignored\n\n";
+}
+
+my $do_default = 1 unless
+    $opt_a || $opt_l || $opt_m || $opt_c || $opt_t || $opt_u || $opt_r;
+
+my $do_all    = 1 if $opt_a  || ($do_default && !$opt_T);
+my $do_lat    = 1 if $do_all || $opt_l;
+my $do_memory = 1 if $do_all || $opt_m || $opt_u;
+my $do_cpu    = 1 if $do_all || $opt_c;
+my $do_topo   = 1 if $do_all || $opt_t;
+my $do_rsrc   = 1 if $do_all || $opt_r;
+
+if ($do_rsrc && LGRP_VER_CURRENT == 1) {
+    print STDERR
+      "$my_name: sorry, your system does not support lgrp_resources(3LGRP)\n"
+	if $opt_r;
+    $do_rsrc = 0;
+}
+
+# Do not print latency by default.
+$do_lat = 0 if $do_default;
+
+my @lgrps = sort {$a <=> $b} $l->lgrps;
+my $root = $l->root;
+my @intermediates = grep { $_ != $root && !$l->isleaf($_) } @lgrps;
+
+# Get list of lgrps from arguments
+my @lgrp_list = @ARGV ? lgrp_expand($l, @ARGV) : @lgrps;
+
+# Apply 'Parent' or 'Children' operations if requested
+@lgrp_list = map { $l->parents($_)  }     @lgrp_list if $opt_P;
+@lgrp_list = map { $l->children($_) }     @lgrp_list if $opt_C;
+
+# Drop repeating elements and sort the list numerically.
+@lgrp_list = sort {$a <=> $b} uniq(@lgrp_list);
+
+# If both -L and -c are specified, just print list of CPUs.
+if ($opt_c && $opt_I) {
+    my @cpus = sort {$a <=> $b}
+      uniq(map { $l->cpus($_, LGRP_CONTENT_HIERARCHY) } @lgrp_list);
+    print "@cpus\n";
+    exit 0;
+}
+
+# Units is Mb by default */
+my $unit_str = "Mb";
+my $units = 1024 * 1024;
+
+# Convert units to canonical numeric and string formats.
+if ($opt_u) {
+    if ($opt_u =~ /^b/i) {
+	$units = 1;
+	$unit_str = "Bytes";
+    } elsif ($opt_u =~ /^k/i) {
+	$units = 1024;
+	$unit_str = "Kb";
+    } elsif ($opt_u =~ /^g/i) {
+	$units *= 1024;
+	$unit_str = "Gb";
+    } elsif ($opt_u =~ /^t/i) {
+	$units *= 1024 * 1024;
+	$unit_str = "Tb";
+    } elsif (! ($opt_u =~ /^m/i)) {
+	print STDERR "$my_name: invalid unit '$opt_u', should be [b|k|m|g|t]";
+	print STDERR ", using Mb.\n\n";
+    }
+}
+
+# If -T is specified, just print topology and return.
+if ($opt_T) {
+    lgrp_prettyprint($l);
+    exit 0;
+}
+
+if (!scalar @lgrp_list) {
+    print STDERR "No matching lgroups found!\n";
+    exit(2);
+}
+
+# Just print list of lgrps if doing just filtering
+(print "@lgrp_list\n"), exit 0 if $opt_I;
+
+# Walk through each requested lgrp and print whatever is requested.
+foreach my $lgrp (@lgrp_list) {
+    last unless $do_topo or $do_cpu or $do_memory or $do_rsrc;
+
+    my $is_leaf = $l->isleaf($lgrp);
+    my $is_interm = ($lgrp != $root && !$is_leaf);
+    my ($children, $parents);
+
+    # For leaf lgrp print direct resources, for intermediate lgrps print all
+    # resorces below it.
+    my $hier = $is_leaf ? LGRP_CONTENT_DIRECT : LGRP_CONTENT_HIERARCHY;
+
+    my $prefix = $lgrp == $root ? "root": $is_leaf ? "leaf" : "intermediate";
+    print "lgroup $lgrp ($prefix):";
+
+    if ($do_topo) {
+	# Get children of this lgrp.
+	my @children = $l->children($lgrp);
+	$children = $is_leaf ? "children: none" : "children: @children";
+	# Are there any parents for this lgrp?
+	my @parents = $l->parents($lgrp);
+	$parents = @parents ? ", parent: @parents" : "";
+    }
+
+    my $cpus = lgrp_showcpus($lgrp, $hier) if $do_cpu;
+    my $memstr = lgrp_showmemory($lgrp, $hier) if $do_memory;
+    my $rsrc = lgrp_showresources($lgrp) if $do_rsrc;
+
+    # Print all the information about lgrp.
+    print "\n\t$children$parents" if $do_topo;
+    print "\n\t$cpus"		if $do_cpu && $cpus;
+    print "\n\t$memstr"		if $do_memory && $memstr;
+    print "\n\t$rsrc"		if $do_rsrc;
+    print "\n";
+}
+
+# Print latency information if requested and the system has several lgroups.
+if ($do_lat && (scalar @lgrps > 1)) {
+    my $spaces = ' ' x 6;
+    print "\nLgroup latencies:\n";
+    print $spaces, join($spaces, , @lgrps), "\n";
+
+    foreach my $l1 (@lgrp_list) {
+	printf "%-2d    ", $l1;
+	foreach my $l2 (@lgrps) {
+	    my $latency = $l->latency($l1, $l2);
+	    if (!defined $latency) {
+		printf "%-7s", "-";
+	    } else {
+		printf "%-6d ", $latency;
+	    }
+	}
+	print "\n";
+    }
+}
+
+exit 0;
+
+sub usage()
+{
+    print STDERR $help;
+    exit(3);
+}
+
+# Remove duplicate elements from the list
+sub uniq(@)
+{
+    my %seen;
+    grep { ++$seen{$_} == 1 } @_;
+}
+
+# Expand list of lgrps.
+# 	Translate 'root' to the root lgrp id
+# 	Translate 'all' to the list of all lgrps
+# 	Translate 'leaves' to the list of all lgrps'
+#	Translate 'intermediate' to the list of intermediates.
+sub lgrp_expand($@)
+{
+    my $lobj = shift;
+    my %seen;
+    my @result;
+
+    # create a hash element for every element in @lgrps
+    map { $seen{$_}++ } @lgrps;
+
+    foreach my $lgrp (@_) {
+	push(@result, $lobj->root),   next if $lgrp =~ m/^root$/i;
+	push(@result, @lgrps),	      next if $lgrp =~ m/^all$/i;
+	push(@result, $lobj->leaves), next if $lgrp =~ m/^leaves$/i;
+	push(@result, @intermediates),next if $lgrp =~ m/^intermediate/i;
+	push(@result, $lgrp),         next if $lgrp =~ m/^\d+$/ && $seen{$lgrp};
+	print STDERR "skipping invalid lgrp $lgrp\n";
+    }
+
+    return @result;
+}
+
+# Build the tree of the lgroup hierarchy starting with the specified node or
+# root if no initial node is specified. Calls itself recursively specifying each
+# of the children as a starting node. Builds a reference to the list with the
+# node in the end and each element being a subtree.
+sub lgrp_tree($;$)
+{
+    my $c = shift;
+    my $lgrp = shift || $c->root;
+
+    # Call myself for each of the children and combine results in a list.
+    [ (map { lgrp_tree($c, $_) } $c->children($lgrp)), $lgrp ];
+}
+
+# pretty-print the hierarchy tree.
+# Input Arguments:
+#	Reference to the tree
+#	Prefix for me to use
+#	Prefix for my children to use
+#	Number of peers left
+sub lgrp_pp($$$$)
+{
+    my $tree = shift;
+    my $myprefix = shift;
+    my $childprefix = shift;
+    my $npeers = shift;
+    my $el = pop @$tree;
+    my $nchildren = scalar @$tree;
+    my $printprefix = "$childprefix";
+    my $printpostfix = $npeers ? "|   " : "    ";
+
+    return unless defined $el;
+
+    my $bar = $npeers ? "|" : "`";
+    print $childprefix ? $childprefix : "";
+    print $myprefix ? "$bar" . "-- " : "";
+    lgrp_print($el, "$printprefix$printpostfix");
+
+    my $new_prefix = $npeers ? $myprefix : "    ";
+
+    # Pretty-print the subtree with a new offset.
+    map { lgrp_pp($_, "|   ", "$childprefix$new_prefix", --$nchildren) } @$tree;
+}
+
+# Pretty print the whole tree
+sub lgrp_prettyprint($)
+{
+    my $c = shift;
+    my $tree = lgrp_tree $c;
+    lgrp_pp($tree, '', '', scalar $tree - 1);
+}
+
+sub lgrp_print($$)
+{
+    my $lgrp = shift;
+    my $prefix = shift;
+    my $is_interm = ($lgrp != $root && !$l->isleaf($lgrp));
+
+    print "$lgrp";
+
+    my $cpus = lgrp_showcpus($lgrp, LGRP_CONTENT_HIERARCHY) if $do_cpu;
+    my $memstr = lgrp_showmemory($lgrp, LGRP_CONTENT_DIRECT) if $do_memory;
+    my $rsrc = lgrp_showresources($lgrp) if $do_rsrc && $is_interm;
+
+    # Print all the information about lgrp.
+    print "\n$prefix$cpus"	if $do_cpu && $cpus && $lgrp != $root;
+    print "\n$prefix$memstr"	if $do_memory && $memstr;
+    print "\n$prefix$rsrc"	if ($do_rsrc && $is_interm);
+    print "\n";
+}
+
+# What CPUs are in this lgrp?
+sub lgrp_showcpus($$)
+{
+    my $lgrp = shift;
+    my $hier = shift;
+
+    my @cpus = $l->cpus($lgrp, $hier);
+    # Sort CPU list if there is something to sort.
+    @cpus = sort {$a <=> $b} @cpus if @cpus > 1;
+    my $cpu_string = lgrp_cpus_to_string(@cpus);
+    my $cpus = @cpus ? 
+      scalar @cpus == 1 ? "CPU:$cpu_string": "CPUs:$cpu_string" :
+	"";
+
+    return (@cpus ? $cpus : 0);
+}
+
+# How much memory does this lgrp contain?
+sub lgrp_showmemory($$)
+{
+    my $lgrp = shift;
+    my $hier = shift;
+
+    my $memory = $l->mem_size($lgrp, LGRP_MEM_SZ_INSTALLED, $hier);
+    my $freemem = $l->mem_size($lgrp, LGRP_MEM_SZ_FREE, $hier);
+    # Convert memory to units.
+    $memory /= $units;
+    $memory = int($memory + 0.5);
+    $freemem /= $units;
+    $freemem = int($freemem + 0.5);
+    my $usedmem = $memory - $freemem;
+    my $memstr = "Memory: installed ${memory} ${unit_str}, ";
+    $memstr = "$memstr allocated ${usedmem} ${unit_str}, ";
+    $memstr = "$memstr free ${freemem} ${unit_str}";
+    return ($memory ? $memstr : 0);
+}
+
+# Get string containing lgroup resources
+sub lgrp_showresources($)
+{
+    my $lgrp = shift;
+    my $rsrc_prefix = "Lgroup resources: ";
+    # What resources does this lgroup contains?
+    my @resources_cpu = sort {$a <=> $b}
+      $l->resources($lgrp, LGRP_RSRC_CPU);
+    my @resources_mem = sort {$a <=> $b}
+      $l->resources($lgrp, LGRP_RSRC_MEM);
+    my $rsrc = @resources_cpu || @resources_mem ? "" : "none";
+    $rsrc = $rsrc_prefix . $rsrc;
+    $rsrc = "$rsrc @resources_cpu (CPU);" if scalar @resources_cpu;
+    $rsrc = "$rsrc @resources_mem (memory)" if scalar @resources_mem;
+    return ($rsrc);
+}
+
+# Consolidate consequtive CPU ids as start-end
+sub lgrp_cpus_to_string(@)
+{
+    return "" unless @_;
+    my $result = "";
+    my $start = shift;
+    my $end = $start;
+    foreach my $lgrp (@_) {
+	if ($lgrp == ($end + 1)) {
+	    $end = $lgrp;
+	} else {
+	    if ($end > $start + 1) {
+		$result = "$result $start-$end";
+	    } elsif ($end > $start) {
+		$result = "$result $start $end";
+	    } else {
+		$result = "$result $start";
+	    }
+	    $start = $end = $lgrp;
+	}
+    }
+    if ($end > $start + 1) {
+	$result = "$result $start-$end";
+    } elsif ($end > $start) {
+	$result = "$result $start $end";
+    } else {
+	$result = "$result $start";
+    }
+    return ($result);
+}
+
+=head1 NAME
+
+lgrpinfo - display information about locality groups
+
+=head1 SYNOPSYS
+
+  lgrpinfo [-achlmrt] [-u unit] [-I] [-C|-P] lgrp ...
+  lgrpinfo -T [-acrm] [-u unit]
+
+=head1 DESCRIPTION
+
+The lgrpinfo command prints information about the locality group (lgroup)
+hierarchy and its contents.
+
+An lgroup represents the set of CPU and memory hardware devices that are at most
+some distance (latency) apart from each other. All lgroups in the system are
+identified by a unique integer called an "lgroup ID". The lgroups are organized
+into a hierarchy to facilitate finding the nearest resources. Leaf lgroups
+contains set of resources that are closest to each other. Each parent lgroup in
+the hierarchy contains the resources of its child lgroups plus their next
+nearest resources. Finally, the root lgroup contains all the resources in the
+domain within the largest latency.
+
+A Uniform Memory Access (UMA) machine will simply be represented by the root
+lgroup. A Non Uniform Memory Access (NUMA) machine is represented by a hierarchy
+of lgroups to show the corresponding levels of locality. For example, a NUMA
+machine with two latencies (local and remote) will have an lgroup hierarchy
+consisting of two levels with its leaves and the root.
+
+Every application thread is assigned a "home" lgroup. When the system needs to
+allocate a CPU or memory resource for the thread, it searches for available
+resources in its home lgroup and continues up the lgroup hierarchy until it
+finds one if necessary.
+
+When called without arguments, lgrpinfo(1) prints general information about all
+lgroups in the system. If any lgroup IDs are given in the command line, the
+command will only print information about the specified lgroups. If an invalid
+lgroup is present in the command line, the lgrpinfo command prints a message on
+standard error showing the invalid ID and continues processing other lgroups
+given in the command line. When none of the specified lgroups are valid,
+lgrpinfo(1) will exit with 2 as its exit status.
+
+In addition to using lgroup IDs, lgroup(s) may be specified on the command line
+using one of the following keywords:
+
+=over
+
+=item B<all>
+
+The list of all lgroups (default)
+
+=item B<root>
+
+The root lgroup which contains all the resources in the domain within the
+largest latency and has no parent lgroup
+
+=item B<leaves>
+
+The list of all leaf lgroups. A leaf lgroup is an lgroup that has no children in
+the lgroup hierarchy.
+
+=item B<intermediate>
+
+List of all intermediate lgroups. An intermediate lgroup is an lgroup that has a
+parent and children.
+
+=back
+
+=head1 OPTIONS
+
+Various options control what the exact information that is printed for each
+lgroup. Options may be combined together and the order given is not important.
+Lower-case options select what information should be printed about lgroup(s) and
+the upper-case options modify the output formatting.
+
+Calling the program without any arguments is equivalent to
+
+  lgrpinfo -t -c -m -u m all
+
+Valid options are:
+
+=over
+
+=item B<-a>
+
+Print topology, CPU, memory and latency information. This option is a shorthand
+for C<-t -c -m -r -l> unless -T is specified as well. When -T is specified, When
+-T is specified, the -t and -l options are omitted.
+
+=item B<-c>
+
+Print CPU information (default)
+
+=item B<-C>
+
+Replace each lgroup in the list with its children(s). This option cannot be used
+with the -P or -T option.
+
+=item B<-h>
+
+Print short help message and exit
+
+=item B<-I>
+
+Only print matching IDs. If C<-c> is specified as well, print list of CPUs
+contained in all matching lgroups. Otherwise, the IDs for the matching lgroups
+will be displayed (see examples).
+
+=item B<-l>
+
+Print information about lgroup latencies
+
+=item B<-m>
+
+Print memory information (default)
+
+=item B<-P>
+
+Replace each lgroup in the list with its parent(s). This option cannot be used
+with the -C or -T option.
+
+=item B<-r>
+
+Print information about lgroup resources. If C<-T> is specified as well, only
+prints information about resources for the leaf lgroups. The resources are
+represented by a set of lgroups in which each lgroup directly contains CPU
+and/or memory resources.
+
+=item B<-t>
+
+Print information about lgroup topology (default)
+
+=item B<-T>
+
+Print the lgroup topology of a system graphically as a tree. If this option is
+combined with C<-c> and/or C<-m>, prints the CPU and/or memory information for
+all leaf lgroups.
+
+=item B<-u> units
+
+Specify memory units. Units should be C<B>, C<K>, C<M>, C<G>, CT> for bytes,
+kilobytes, megabytes, gigabytes and terabytes respectively. By default, memory
+is printed in megabytes. This option implies B<-m>.
+
+=back
+
+Only one of C<-C> or C<-P> options may be present. If there are no children or
+parent lgroups for any lgroups specified on the command line, the program writes
+a warning message to standard error and returns exit code 2. Also, if all
+lgroups specified on the command line are invalid, the program writes a warning
+message on standard error and returns exit code 3.
+
+=head1 EXAMPLES
+
+=over
+
+=item 1
+
+Print general information about lgroups in the system. The system is a two-CPU
+AMD Opteron with two nodes, each having one CPU and 1Gb of memory. Each CPU and
+memory node goes into its own leaf lgroup and the root lgroups contains all the
+resources:
+
+  lgroup 0 (root):
+          children: 1 2
+          CPUs: 0 1
+          installed 2048 Mb,  allocated 567 Mb,  free 1481 Mb
+          CPU resources: 1 2;  Memory resources: 1 2;
+  lgroup 1 (leaf):
+          children: none, parent: 0
+          CPU: 0
+          installed 1024 Mb,  allocated 283 Mb,  free 741 Mb
+          CPU resources: 1;  Memory resources: 1;
+  lgroup 2 (leaf):
+          children: none, parent: 0
+          CPU: 1
+          installed 1024 Mb,  allocated 284 Mb,  free 740 Mb
+          CPU resources: 2;  Memory resources: 2;
+
+=item 2
+
+Print information about the root lgrp:
+
+  $ lgrpinfo root
+  lgroup 0 (root):
+          children: 1 2
+          CPUs: 0 1
+          Memory: installed 2048 Mb,  allocated 1221 Mb,  free 827 Mb
+          Lgroup resources:  1 2 (CPU); 1 2 (memory)
+
+=item 3
+
+Print general information about lgroup 2:
+
+  $ lgrpinfo 2
+  lgroup 2 (leaf):
+          children: none, parent: 0
+          CPU: 1
+          installed 1024 Mb,  allocated 337 Mb,  free 687 Mb
+          CPU resources: 2;  Memory resources: 2;
+
+=item 4
+
+Print information about CPUs in lgroups:
+
+  $ lgrpinfo -c
+  lgroup 0 (root):
+          CPUs: 0 1
+  lgroup 1 (leaf):
+          CPU: 0
+  lgroup 2 (leaf):
+        CPU: 1
+
+=item 5
+
+Print IDs of all lgroups in the system:
+
+  $ lgrpinfo -I
+  0 1 2
+
+=item 6
+
+Print lgroup IDs for children of the root lgroup:
+
+  $ lgrpinfo -I -C root
+  1 2
+
+=item 7
+
+Print CPU IDs for all CPUs in lgroup 1:
+
+  $ lgrpinfo -c -I 1
+  0
+
+=item 8
+
+Print information about lgroup latencies:
+
+  $ lgrpinfo -l
+
+  Lgroup latencies:
+        0      1      2
+  0     104    104    104
+  1     104    71     104
+  2     104    104    71
+
+=item 9
+
+Print latencies for the root lgroup:
+
+  $ lgrpinfo -l root
+
+  Lgroup latencies:
+      0      1      2
+0     104    104    104
+
+=item 10
+
+Print memory information for every lgroup:
+
+  lgroup 0 (root):
+          Memory: installed 2048 Mb,  allocated 1221 Mb,  free 827 Mb
+  lgroup 1 (leaf):
+          Memory: installed 1024 Mb,  allocated 651 Mb,  free 373 Mb
+  lgroup 2 (leaf):
+          Memory: installed 1024 Mb,  allocated 570 Mb,  free 454 Mb
+
+=item 11
+
+Print information about lgroup topology on a 4-CPU AMD Opteron machine:
+
+  $ lgrpinfo -t
+  lgroup 0 (root):
+          children: 5 6 7 8
+  lgroup 1 (leaf):
+          children: none, parent: 5
+  lgroup 2 (leaf):
+          children: none, parent: 6
+  lgroup 3 (leaf):
+          children: none, parent: 7
+  lgroup 4 (leaf):
+          children: none, parent: 8
+  lgroup 5 (intermediate):
+          children: 1, parent: 0
+  lgroup 6 (intermediate):
+          children: 2, parent: 0
+  lgroup 7 (intermediate):
+          children: 3, parent: 0
+  lgroup 8 (intermediate):
+          children: 4, parent: 0
+
+=item 12
+
+Print lgroup topology tree on a 4-CPU AMD Opteron machine:
+
+  $ lgrpinfo -T
+  0
+  |-- 5
+  |   `-- 1
+  |-- 6
+  |   `-- 2
+  |-- 7
+  |   `-- 3
+  `-- 8
+      `-- 4
+
+=item 13
+
+Print lgroup topology tree, resources, memory and CPU information on a 4-CPU AMD
+Opteron machine:
+
+  0
+  |-- 5
+  |   CPUs: 0-2
+  |   Lgroup resources:  1 2 3 (CPU); 1 2 3 (memory)
+  |   `-- 1
+  |       CPU: 0
+  |       Memory: installed 2048 Mb,  allocated 182 Mb,  free 1866 Mb
+  |-- 6
+  |   CPUs: 0 1 3
+  |   Lgroup resources:  1 2 4 (CPU); 1 2 4 (memory)
+  |   `-- 2
+  |       CPU: 1
+  |       Memory: installed 1599 Mb,  allocated 25 Mb,  free 1574 Mb
+  |-- 7
+  |   CPUs: 0 2 3
+  |   Lgroup resources:  1 3 4 (CPU); 1 3 4 (memory)
+  |   `-- 3
+  |       CPU: 2
+  |       Memory: installed 2048 Mb,  allocated 131 Mb,  free 1917 Mb
+  `-- 8
+      CPUs: 1-3
+      Lgroup resources:  2 3 4 (CPU); 2 3 4 (memory)
+      `-- 4
+          CPU: 3
+          Memory: installed 2048 Mb,  allocated 26 Mb,  free 2022 Mb
+
+=back
+
+=head1 EXIT STATUS
+
+The following exit values are returned:
+
+=over
+
+=item 0
+
+Successful operation.
+
+=item 1
+
+Unable to get lgroup information from the system.
+
+=item 2
+
+Option C<-C> or C<-P> is specified and there are no children or parents for any
+lgroup specified on the command line or all lgroups specified on the command
+line are invalid.
+
+=item 3
+
+Invalid arguments in the command line.
+
+=back
+
+=head1 COPYRIGHT
+
+Copyright 2005 Sun Microsystems, Inc. All rights reserved. Use is subject to
+license terms.
+
+The lgrpinfo program is subject to the terms of the Common Development
+and Distribution License (the "License"). You may not use this file except in
+compliance with the License.
+
+You can obtain a copy of the license at http://www.opensolaris.org/os/licensing
+. See the License for the specific language governing permissions and
+limitations under the License.
+
+=head1 AUTHOR
+
+The lgrpinfo script was written originally by Alexander Kolbasov
+<alexander.kolbasov@sun.com>.
+
+=head1 SEE ALSO
+
+L<Solaris::Lgrp(1)>, L<liblgrp(3LIB)>, L<plgrp(1)>, L<pmap(1)>.
+
+=cut
