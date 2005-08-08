@@ -23,21 +23,17 @@
 # Copyright 2005 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
 #
-#ident	"@(#)Makefile.PL	1.1	05/08/05"
+#ident	"@(#)Makefile.PL	1.2	05/08/08"
 #
 
 use strict;
 use warnings;
 use ExtUtils::MakeMaker;
 
-# List of POD pages to install.
-my @man3pods = ( MAN3PODS => {} );
-
 #
 # If not building as part of ON.
 #
 if (! exists($ENV{CODEMGR_WS})) {
-
 	#
 	# Suppress the setting of LD_RUN_PATH.  The ON build environment
 	# contains a modified MakeMaker that does this automatically, so we
@@ -62,14 +58,6 @@ if (! exists($ENV{CODEMGR_WS})) {
 		$txt =~ s/LD_RUN_PATH=\S*\s*//;
 		return($txt);
 	};
-
-	#
-	# Install the POD documentation for non-ON builds.
-	#
-	my $man3pfx = '$(INST_MAN3DIR)/Solaris::Lgrp';
-	@man3pods = (
-	    MAN3PODS => { 'pod/Lgrp.pod' => $man3pfx . '.$(MAN3EXT)' }
-	);
 }
 
 WriteMakefile(
@@ -79,5 +67,4 @@ WriteMakefile(
     LIBS              => ['-llgrp '],
     AUTHOR	      => 'Alexander Kolbasov <alexander.kolbasov@sun.com>',
     EXE_FILES	      => ['bin/lgrpinfo'],
-    @man3pods,
 );

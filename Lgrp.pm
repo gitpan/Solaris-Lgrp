@@ -27,7 +27,7 @@
 #
 # Copyright 2005 Sun Microsystems, Inc.  All rights reserved.
 #
-#ident	"@(#)Lgrp.pm	1.1	05/08/05"
+#ident	"@(#)Lgrp.pm	1.2	05/08/08"
 #
 
 use strict;
@@ -36,7 +36,7 @@ use Carp;
 
 package Solaris::Lgrp;
 
-our $VERSION = '0.1.1';
+our $VERSION = '0.1.2';
 use XSLoader;
 XSLoader::load(__PACKAGE__, $VERSION);
 
