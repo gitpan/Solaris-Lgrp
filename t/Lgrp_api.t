@@ -1,39 +1,43 @@
-#!/usr/bin/perl -w
+#!/usr/bin/perl
 
+#
+# Copyright 2005 Sun Microsystems, Inc.  All rights reserved.
+# Use is subject to license terms.
+#
 # CDDL HEADER START
 #
-# The contents of this file are subject to the terms
-# of the Common Development and Distribution License
-# (the "License").  You may not use this file except
-# in compliance with the License.
+# The contents of this file are subject to the terms of the
+# Common Development and Distribution License, Version 1.0 only
+# (the "License").  You may not use this file except in compliance
+# with the License.
 #
-# You can obtain a copy of the license at
-# http://www.opensolaris.org/os/licensing.
-# See the License for the specific language governing
-# permissions and limitations under the License.
+# You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+# or http://www.opensolaris.org/os/licensing.
+# See the License for the specific language governing permissions
+# and limitations under the License.
 #
-# When distributing Covered Code, include this CDDL
-# HEADER in each file and include the License file at
-# usr/src/OPENSOLARIS.LICENSE.  If applicable,
-# add the following below this CDDL HEADER, with the
-# fields enclosed by brackets "[]" replaced with your
-# own identifying information: Portions Copyright [yyyy]
-# [name of copyright owner]
+# When distributing Covered Code, include this CDDL HEADER in each
+# file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+# If applicable, add the following below this CDDL HEADER, with the
+# fields enclosed by brackets "[]" replaced with your own identifying
+# information: Portions Copyright [yyyy] [name of copyright owner]
 #
 # CDDL HEADER END
 #
-# Copyright 2005 Sun Microsystems, Inc.  All rights reserved.
+# Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+# Use is subject to license terms.
 #
-#ident	"@(#)Lgrp_api.t	1.1	05/08/05"
+#ident	"@(#)Lgrp_api.t	1.2	06/05/31 SMI"
 #
 
+require 5.8.0;
 use strict;
 use warnings;
 
 ######################################################################
-# Tests for Solaris::Lgrp API.
+# Tests for Sun::Solaris::Lgrp API.
 #
-# This is an example script that demonstrates use of Solaris::Lgrp module.
+# This is an example script that demonstrates use of Sun::Solaris::Lgrp module.
 # It can be used to test the module itself, the liblgrp library or the in-kernel
 # implementation.
 ######################################################################
@@ -42,16 +46,16 @@ use warnings;
 use Test::More tests => 33;
 
 # Verify that we can load the module
-BEGIN { use_ok('Solaris::Lgrp') };
+BEGIN { use_ok('Sun::Solaris::Lgrp') };
 
-use Solaris::Lgrp ':ALL';
+use Sun::Solaris::Lgrp ':ALL';
 
 my ($home, $fail);
 
 ######################################################################
 # Verify that lgrp_init() works.
 ##
-my $c = Solaris::Lgrp->new(LGRP_VIEW_OS);
+my $c = Sun::Solaris::Lgrp->new(LGRP_VIEW_OS);
 ok($c, 'lgrp_init') or die("lgrp_init: $!");
 #
 ######################################################################
@@ -315,6 +319,7 @@ SKIP: {
     is($fail, 0, 'Each lgrp containing CPU resources should be leaf');
     is($nc, $ncpus, 'Number of CPUs should match');
 }
+
 #
 ######################################################################
 # THE END!

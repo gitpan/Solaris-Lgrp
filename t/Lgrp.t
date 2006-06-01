@@ -1,32 +1,32 @@
 #!/usr/bin/perl -w
 
+#
 # CDDL HEADER START
 #
-# The contents of this file are subject to the terms
-# of the Common Development and Distribution License
-# (the "License").  You may not use this file except
-# in compliance with the License.
+# The contents of this file are subject to the terms of the
+# Common Development and Distribution License, Version 1.0 only
+# (the "License").  You may not use this file except in compliance
+# with the License.
 #
-# You can obtain a copy of the license at
-# http://www.opensolaris.org/os/licensing.
-# See the License for the specific language governing
-# permissions and limitations under the License.
+# You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+# or http://www.opensolaris.org/os/licensing.
+# See the License for the specific language governing permissions
+# and limitations under the License.
 #
-# When distributing Covered Code, include this CDDL
-# HEADER in each file and include the License file at
-# usr/src/OPENSOLARIS.LICENSE.  If applicable,
-# add the following below this CDDL HEADER, with the
-# fields enclosed by brackets "[]" replaced with your
-# own identifying information: Portions Copyright [yyyy]
-# [name of copyright owner]
+# When distributing Covered Code, include this CDDL HEADER in each
+# file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+# If applicable, add the following below this CDDL HEADER, with the
+# fields enclosed by brackets "[]" replaced with your own identifying
+# information: Portions Copyright [yyyy] [name of copyright owner]
 #
 # CDDL HEADER END
 #
-# Copyright 2005 Sun Microsystems, Inc.  All rights reserved.
+# Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
+# Use is subject to license terms.
 #
-#ident	"@(#)Lgrp.t	1.1	05/08/05"
+#ident	"@(#)Lgrp.t	1.2	06/05/31 SMI"
 #
-# Tests for Solaris::Lgrp API.
+# Tests for Sun::Solaris::Lgrp API.
 #
 # Before `make install' is performed this script should be runnable with
 # `make test'. After `make install' it should work as `perl Lgrp.t'
@@ -40,9 +40,9 @@ use warnings;
 use Test;
 
 # Tests to run
-BEGIN { plan tests => 49 }
+BEGIN { plan tests => 63 }
 
-use Solaris::Lgrp ':ALL';
+use Sun::Solaris::Lgrp ':ALL';
 
 #
 ######################################################################
@@ -216,18 +216,20 @@ ok($latency, $latency1, 'Latencies should match');
 ##
 my @lgrps_c = lgrp_resources($c, $root, LGRP_RSRC_CPU);
 my $nresources = lgrp_resources($c, $root, LGRP_RSRC_CPU);
-ok (!defined $nresources) if $version < 2;
+ok(!defined $nresources) if $version < 2;
 ok(scalar @lgrps_c, 0) if $version < 2;
 ok($nresources) if $version >= 2;
 ok(@lgrps_c) if $version >= 2;
 
+##
+# lgrp_fini should always succeed.
 ok(lgrp_fini($c));
 
 
 ######################################################################
 # Now test Object-Oriented interface.
 ##
-$c = Solaris::Lgrp->new or
+$c = Sun::Solaris::Lgrp->new or
     die "Lgrp->new(LGRP_VIEW_OS): $!";
 
 ok($c->view, LGRP_VIEW_OS);
@@ -247,6 +249,56 @@ ok(lgrp_latency($root, $root), $c->latency($root, $root));
 my @lgrps_c1 = $c->resources($root, LGRP_RSRC_CPU);
 ok(@lgrps_c, @lgrps_c1);
 ok(lgrp_version(LGRP_VER_NONE), $c->version);
+
+#
+######################################################################
+# Can we call lgrp_home?
+##
+$home = lgrp_home(P_PID, P_MYID);
+ok(defined($home));
+my $home1 = $c->home(P_PID, P_MYID);
+ok($home1 == $home);
+$home1 = lgrp_home(P_LWPID, 1);
+ok($home1 == $home);
+$home1 = $c->home(P_LWPID, 1);
+ok($home1 == $home);
+
+#
+######################################################################
+# Can we call lgrp_affinity_set?
+##
+my $affinity;
+
+ok(LGRP_AFF_WEAK);
+ok(P_LWPID);
+
+$affinity = $c->affinity_set(P_PID, P_MYID, $home, LGRP_AFF_WEAK);
+ok($affinity);
+
+$affinity = $c->affinity_set(P_LWPID, 1, $home, LGRP_AFF_WEAK);
+ok($affinity);
+
+$affinity = lgrp_affinity_set(P_PID, P_MYID, $home, LGRP_AFF_WEAK);
+ok($affinity);
+
+$affinity = lgrp_affinity_set(P_LWPID, 1, $home, LGRP_AFF_WEAK);
+ok($affinity);
+
+#
+######################################################################
+# Can we call lgrp_affinity_get?
+##
+$affinity = lgrp_affinity_get(P_PID, P_MYID, $home);
+ok($affinity = LGRP_AFF_WEAK);
+
+$affinity = lgrp_affinity_get(P_LWPID, 1, $home);
+ok($affinity == LGRP_AFF_WEAK);
+
+$affinity = $c->affinity_get(P_PID, P_MYID, $home);
+ok($affinity == LGRP_AFF_WEAK);
+
+$affinity = $c->affinity_get(P_LWPID, 1, $home);
+ok($affinity == LGRP_AFF_WEAK);
 
 #
 ######################################################################
