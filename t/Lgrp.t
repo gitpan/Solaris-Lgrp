@@ -24,9 +24,9 @@
 # Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
 #
-#ident	"@(#)Lgrp.t	1.2	06/05/31 SMI"
+#ident	"@(#)Lgrp.t	1.3	06/06/08 SMI"
 #
-# Tests for Sun::Solaris::Lgrp API.
+# Tests for Solaris::Lgrp API.
 #
 # Before `make install' is performed this script should be runnable with
 # `make test'. After `make install' it should work as `perl Lgrp.t'
@@ -42,7 +42,7 @@ use Test;
 # Tests to run
 BEGIN { plan tests => 63 }
 
-use Sun::Solaris::Lgrp ':ALL';
+use Solaris::Lgrp ':ALL';
 
 #
 ######################################################################
@@ -229,7 +229,7 @@ ok(lgrp_fini($c));
 ######################################################################
 # Now test Object-Oriented interface.
 ##
-$c = Sun::Solaris::Lgrp->new or
+$c = Solaris::Lgrp->new or
     die "Lgrp->new(LGRP_VIEW_OS): $!";
 
 ok($c->view, LGRP_VIEW_OS);

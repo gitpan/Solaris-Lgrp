@@ -23,14 +23,14 @@
 # Use is subject to license terms.
 #
 #
-#ident	"@(#)Lgrp.pm	1.3	06/05/31 SMI"
+#ident	"@(#)Lgrp.pm	1.4	06/06/08 SMI"
 #
 #
 # Lgrp.pm provides procedural and object-oriented interface to the Solaris
 # liblgrp(3LIB) library.
 #
 
-#ident	"@(#)Lgrp.pm	1.3	06/05/31 SMI"
+#ident	"@(#)Lgrp.pm	1.4	06/06/08 SMI"
 
 require 5.6.1;
 use strict;
@@ -39,7 +39,7 @@ use Carp;
 
 package Solaris::Lgrp;
 
-our $VERSION = '0.1.3';
+our $VERSION = '0.1.4';
 use XSLoader;
 XSLoader::load(__PACKAGE__, $VERSION);
 

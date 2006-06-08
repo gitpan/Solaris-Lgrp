@@ -27,7 +27,7 @@
 # Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
 #
-#ident	"@(#)Lgrp_api.t	1.2	06/05/31 SMI"
+#ident	"@(#)Lgrp_api.t	1.3	06/06/08 SMI"
 #
 
 require 5.8.0;
@@ -35,9 +35,9 @@ use strict;
 use warnings;
 
 ######################################################################
-# Tests for Sun::Solaris::Lgrp API.
+# Tests for Solaris::Lgrp API.
 #
-# This is an example script that demonstrates use of Sun::Solaris::Lgrp module.
+# This is an example script that demonstrates use of Solaris::Lgrp module.
 # It can be used to test the module itself, the liblgrp library or the in-kernel
 # implementation.
 ######################################################################
@@ -46,16 +46,16 @@ use warnings;
 use Test::More tests => 33;
 
 # Verify that we can load the module
-BEGIN { use_ok('Sun::Solaris::Lgrp') };
+BEGIN { use_ok('Solaris::Lgrp') };
 
-use Sun::Solaris::Lgrp ':ALL';
+use Solaris::Lgrp ':ALL';
 
 my ($home, $fail);
 
 ######################################################################
 # Verify that lgrp_init() works.
 ##
-my $c = Sun::Solaris::Lgrp->new(LGRP_VIEW_OS);
+my $c = Solaris::Lgrp->new(LGRP_VIEW_OS);
 ok($c, 'lgrp_init') or die("lgrp_init: $!");
 #
 ######################################################################
